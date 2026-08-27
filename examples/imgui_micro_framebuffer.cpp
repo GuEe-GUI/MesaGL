@@ -11,7 +11,8 @@ int main(void)
     MesaGLPortConfig config = {{pixels, 320, 240, 320 * 2, NTGL_RGB565, NTGL_ORIGIN_TOP_LEFT},
                                {NULL, NULL, NULL},
                                NULL,
-                               NULL};
+                               NULL,
+                               {NULL, NULL}};
     MesaGLPortContext *gl_context = mesaGLPortCreate(&config);
     int changed = 0;
     if (!gl_context)

@@ -9,7 +9,7 @@ int main(void)
     NTGLframebuffer fb = {pixels, 16, 16, 16 * 2, NTGL_RGB565, NTGL_ORIGIN_TOP_LEFT};
     NTGLcontext *context = ntglCreateContext(&fb, NULL);
     uint16_t center;
-    GLubyte readback[3];
+    GLubyte readback[4];
     if (!context)
         return 1;
     ntglClearColor(0, 0, 1, 1);
@@ -70,7 +70,7 @@ int main(void)
     ntglEnd();
     center = pixels[8 * 16 + 8];
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(8, 7, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, readback);
+    glReadPixels(8, 7, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, readback);
     if (glGetError() != GL_NO_ERROR || readback[0] < 55 || readback[0] > 75 || readback[2] < 180 ||
         readback[2] > 205) {
         ntglDestroyContext(context);

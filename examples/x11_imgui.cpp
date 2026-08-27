@@ -2,6 +2,7 @@
 #include "backends/imgui_impl_opengl3.h"
 #include "GLES2/gl2.h"
 #include "mesaGL/port.h"
+#include "mesaGL_imgui_x11.h"
 #include "mesaGL_x11.h"
 
 #include <stdio.h>
@@ -49,6 +50,7 @@ static void render_frame(MesaGLPortContext *context, int width, int height)
 {
     static float quality = 0.82f;
     static bool antialiasing = true;
+    static char label[64] = "mesaGL framebuffer";
     ImGuiIO &io = ImGui::GetIO();
     io.DisplaySize = ImVec2((float)width, (float)height);
     io.DeltaTime = 1.0f / 60.0f;
@@ -80,6 +82,7 @@ static void render_frame(MesaGLPortContext *context, int width, int height)
     ImGui::TextDisabled("RENDER SETTINGS");
     ImGui::Checkbox("Antialiasing", &antialiasing);
     ImGui::SliderFloat("Quality", &quality, 0.25f, 1.0f, "%.0f%%");
+    ImGui::InputText("Label", label, sizeof(label));
     ImGui::ProgressBar(quality, ImVec2(-1, 10), "");
     ImGui::Spacing();
     if (ImGui::Button("Apply settings", ImVec2(170, 38))) {
@@ -121,6 +124,7 @@ int main(void)
     io.IniFilename = NULL;
     io.DisplaySize = ImVec2((float)width, (float)height);
     io.DeltaTime = 1.0f / 60.0f;
+    mesaGLImGuiX11Init(x11);
     ImFontConfig font_config;
     font_config.SizePixels = 17.0f;
     io.Fonts->AddFontDefault(&font_config);
@@ -131,6 +135,7 @@ int main(void)
     while (mesaGLX11WaitEvent(x11))
         render_frame(context, width, height);
 
+    mesaGLImGuiX11Shutdown(x11);
     ImGui_ImplOpenGL3_Shutdown();
     ImGui::DestroyContext();
     mesaGLPortDestroy(context);

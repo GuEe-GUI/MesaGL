@@ -41,6 +41,7 @@ MesaGLPortContext *mesaGLPortCreate(const MesaGLPortConfig *config)
         allocator.free(allocator.user, context);
         return NULL;
     }
+    ntglSetPixelOps(context->renderer, &config->pixel_ops);
     return context;
 }
 

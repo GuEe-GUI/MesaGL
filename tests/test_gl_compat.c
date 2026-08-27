@@ -290,7 +290,8 @@ int main(void)
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glDeleteTextures(1, &fbo_texture);
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, state_values);
-    if (state_values[0] != 0)
+    if ((GLuint)state_values[0] != framebuffer ||
+        glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
         return 14;
     glDeleteFramebuffers(1, &framebuffer);
     glDeleteRenderbuffers(1, &depth_renderbuffer);

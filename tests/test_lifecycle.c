@@ -11,7 +11,8 @@ int main(void)
         uint32_t pixels[8 * 8] = {0};
         uint32_t texture_pixels[4] = {0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu};
         MesaGLPortConfig config = {
-            {pixels, 8, 8, 8 * 4, NTGL_RGBA8888, NTGL_ORIGIN_BOTTOM_LEFT}, {0}, 0, 0};
+            {pixels, 8, 8, 8 * 4, NTGL_RGBA8888, NTGL_ORIGIN_BOTTOM_LEFT},
+            {0}, 0, 0, {0}};
         MesaGLPortContext *context = mesaGLPortCreate(&config);
         GLuint texture, buffer, shader;
         if (!context || mesaGLPortMakeCurrent(context) != NTGL_OK)

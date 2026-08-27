@@ -13,9 +13,11 @@ int main(void)
         {NULL, NULL, NULL},
         NULL,
         NULL,
+        {NULL, NULL},
     };
     MesaGLPortContext *gl_context = mesaGLPortCreate(&config);
     int changed = 0;
+    uint64_t checksum = UINT64_C(1469598103934665603);
     unsigned i;
     if (!gl_context)
         return 1;
@@ -41,10 +43,16 @@ int main(void)
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-    for (i = 0; i < 320u * 240u; ++i)
+    for (i = 0; i < 320u * 240u; ++i) {
         if (pixels[i])
             ++changed;
-    printf("Dear ImGui GLES2 rendered %d non-black RGB565 pixels\n", changed);
+        checksum ^= pixels[i] & 0xffu;
+        checksum *= UINT64_C(1099511628211);
+        checksum ^= pixels[i] >> 8;
+        checksum *= UINT64_C(1099511628211);
+    }
+    printf("Dear ImGui GLES2 rendered %d non-black RGB565 pixels, "
+           "checksum %016llx\n", changed, (unsigned long long)checksum);
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui::DestroyContext();

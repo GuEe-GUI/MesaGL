@@ -16,6 +16,7 @@ typedef struct MesaGLPortConfig {
     NTGLallocator allocator;
     MesaGLPresentFn present;
     void *user;
+    NTGLpixelOps pixel_ops;
 } MesaGLPortConfig;
 
 MesaGLPortContext *mesaGLPortCreate(const MesaGLPortConfig *config);

@@ -20,6 +20,7 @@ int main(void)
     NTGLcontext *a = ntglCreateContext(&fb_a, NULL);
     NTGLcontext *b = ntglCreateContext(&fb_b, NULL);
     GLint viewport[4], binding;
+    GLfloat attribute[4];
     GLuint texture, texture_b, buffer_a, buffer_b;
 
     if (!a || !b)
@@ -27,10 +28,13 @@ int main(void)
 
     ntglMakeCurrent(a);
     glViewport(1, 2, 13, 14);
+    glActiveTexture(GL_TEXTURE1);
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
     glGenBuffers(1, &buffer_a);
     glBindBuffer(GL_ARRAY_BUFFER, buffer_a);
+    glDisable(GL_DITHER);
+    glVertexAttrib4f(3, 0.25f, 0.5f, 0.75f, 1.0f);
     ntglViewport(0, 0, 16, 16);
     ntglClearColor(1, 0, 0, 1);
     ntglClear(1, 0);
@@ -45,6 +49,13 @@ int main(void)
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &binding);
     if (binding != 0)
         return 8;
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &binding);
+    if (binding != GL_TEXTURE0 || !glIsEnabled(GL_DITHER))
+        return 11;
+    glGetVertexAttribfv(3, GL_CURRENT_VERTEX_ATTRIB, attribute);
+    if (attribute[0] != 0.0f || attribute[1] != 0.0f || attribute[2] != 0.0f ||
+        attribute[3] != 1.0f)
+        return 12;
     glGenBuffers(1, &buffer_b);
     if (buffer_b != 1)
         return 9;
@@ -66,6 +77,13 @@ int main(void)
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &binding);
     if (binding != (GLint)buffer_a)
         return 10;
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &binding);
+    if (binding != GL_TEXTURE1 || glIsEnabled(GL_DITHER))
+        return 13;
+    glGetVertexAttribfv(3, GL_CURRENT_VERTEX_ATTRIB, attribute);
+    if (attribute[0] != 0.25f || attribute[1] != 0.5f || attribute[2] != 0.75f ||
+        attribute[3] != 1.0f)
+        return 14;
     draw_point(1, 1, 1);
     ntglClearColor(0, 1, 0, 1);
     ntglClear(1, 0);
@@ -74,7 +92,7 @@ int main(void)
         return 2;
     if ((pixels_a[8 * 16 + 12] & 0x00ffffffu) != 0x000000ffu)
         return 3;
-    if ((pixels_b[8 * 16 + 8] & 0x00ffffffu) != 0x0000ff00u)
+    if ((pixels_b[7 * 16 + 7] & 0x00ffffffu) != 0x0000ff00u)
         return 4;
 
     ntglMakeCurrent(a);

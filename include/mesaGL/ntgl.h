@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "mesaGL/config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,6 +22,8 @@ typedef enum NTGLresult {
 
 typedef enum NTGLformat {
     NTGL_RGB565,
+    NTGL_RGBA4444,
+    NTGL_RGBA5551,
     NTGL_RGB888,
     NTGL_BGR888,
     NTGL_XRGB8888,
@@ -58,6 +61,7 @@ typedef enum NTGLcapability {
     NTGL_SCISSOR_TEST,
     NTGL_STENCIL_TEST,
     NTGL_ALPHA_TEST,
+    NTGL_POLYGON_OFFSET_FILL,
     NTGL_LIGHTING,
     NTGL_LIGHT0,
     NTGL_LIGHT1,
@@ -68,7 +72,8 @@ typedef enum NTGLcapability {
     NTGL_LIGHT6,
     NTGL_LIGHT7,
     NTGL_FOG,
-    NTGL_NORMALIZE
+    NTGL_NORMALIZE,
+    NTGL_DITHER
 } NTGLcapability;
 
 typedef enum NTGLfogMode { NTGL_FOG_LINEAR, NTGL_FOG_EXP, NTGL_FOG_EXP2 } NTGLfogMode;
@@ -79,6 +84,8 @@ typedef enum NTGLstencilOp {
     NTGL_REPLACE,
     NTGL_INCR,
     NTGL_DECR,
+    NTGL_INCR_WRAP,
+    NTGL_DECR_WRAP,
     NTGL_INVERT
 } NTGLstencilOp;
 
@@ -107,7 +114,8 @@ typedef enum NTGLblendFactor {
     NTGL_CONSTANT_COLOR,
     NTGL_ONE_MINUS_CONSTANT_COLOR,
     NTGL_CONSTANT_ALPHA,
-    NTGL_ONE_MINUS_CONSTANT_ALPHA
+    NTGL_ONE_MINUS_CONSTANT_ALPHA,
+    NTGL_SRC_ALPHA_SATURATE
 } NTGLblendFactor;
 
 typedef enum NTGLblendEquation {
@@ -120,7 +128,7 @@ typedef enum NTGLblendEquation {
 
 typedef enum NTGLfilter { NTGL_NEAREST, NTGL_LINEAR } NTGLfilter;
 
-typedef enum NTGLwrap { NTGL_REPEAT, NTGL_CLAMP_TO_EDGE } NTGLwrap;
+typedef enum NTGLwrap { NTGL_REPEAT, NTGL_CLAMP_TO_EDGE, NTGL_MIRRORED_REPEAT } NTGLwrap;
 
 typedef enum NTGLtextureEnv {
     NTGL_TEXTURE_MODULATE,
@@ -132,12 +140,40 @@ typedef enum NTGLtextureEnv {
 
 typedef void *(*NTGLallocFn)(void *user, size_t size);
 typedef void (*NTGLfreeFn)(void *user, void *pointer);
+typedef void (*NTGLfragmentFn)(void *user, float color[4]);
+typedef int (*NTGLprogramFragmentFn)(void *user, const float *varyings, int varying_count,
+                                     const float *varying_dfdx, const float *varying_dfdy,
+                                     const float frag_coord[4], int front_facing,
+                                     const float point_coord[2], float color[4]);
+
+typedef struct NTGLprogramVertex {
+    float position[4];
+    float varying[MESAGL_MAX_VARYING_INTERPOLATORS][4];
+    float point_size;
+} NTGLprogramVertex;
 
 typedef struct NTGLallocator {
     NTGLallocFn alloc;
     NTGLfreeFn free;
     void *user;
 } NTGLallocator;
+
+typedef struct NTGLlinearColumn {
+    int x0;
+    int x1;
+    float alpha;
+} NTGLlinearColumn;
+
+/* Return nonzero after writing count contiguous XRGB8888 pixels. */
+typedef int (*NTGLlinearRGBA8888ToXRGB8888SpanFn)(
+    void *user, unsigned char *destination,
+    const unsigned char *source_row0, const unsigned char *source_row1,
+    const NTGLlinearColumn *columns, int count, float row_alpha);
+
+typedef struct NTGLpixelOps {
+    NTGLlinearRGBA8888ToXRGB8888SpanFn linear_rgba8888_to_xrgb8888;
+    void *user;
+} NTGLpixelOps;
 
 typedef struct NTGLframebuffer {
     void *pixels;
@@ -167,13 +203,17 @@ NTGLcontext *ntglCreateContext(const NTGLframebuffer *framebuffer, const NTGLall
 void ntglDestroyContext(NTGLcontext *context);
 NTGLresult ntglMakeCurrent(NTGLcontext *context);
 NTGLcontext *ntglGetCurrent(void);
+void ntglSetPixelOps(NTGLcontext *context, const NTGLpixelOps *operations);
 void *ntglAlloc(size_t size);
 void ntglFree(void *pointer);
 NTGLresult ntglAttachFramebuffer(NTGLcontext *context, const NTGLframebuffer *framebuffer);
+NTGLresult ntglAttachAuxBuffers(NTGLcontext *context, float *depth, unsigned char *stencil);
 const NTGLframebuffer *ntglGetFramebuffer(const NTGLcontext *context);
 NTGLresult ntglResize(NTGLcontext *context, int width, int height);
 
 void ntglViewport(int x, int y, int width, int height);
+void ntglDepthRange(float near_value, float far_value);
+void ntglPolygonOffset(float factor, float units);
 void ntglScissor(int x, int y, int width, int height);
 void ntglClearColor(float red, float green, float blue, float alpha);
 void ntglClearDepth(float depth);
@@ -186,8 +226,12 @@ void ntglColorMask(int red, int green, int blue, int alpha);
 void ntglClearStencil(unsigned value);
 void ntglClearStencilBuffer(void);
 void ntglStencilFunc(NTGLdepthFunc function, unsigned reference, unsigned mask);
+void ntglStencilFuncSeparate(int front, NTGLdepthFunc function, unsigned reference, unsigned mask);
 void ntglStencilMask(unsigned mask);
+void ntglStencilMaskSeparate(int front, unsigned mask);
 void ntglStencilOp(NTGLstencilOp fail, NTGLstencilOp depth_fail, NTGLstencilOp pass);
+void ntglStencilOpSeparate(int front, NTGLstencilOp fail, NTGLstencilOp depth_fail,
+                           NTGLstencilOp pass);
 void ntglAlphaFunc(NTGLdepthFunc function, float reference);
 void ntglShadeModel(int smooth);
 void ntglBlendFunc(NTGLblendFactor source, NTGLblendFactor destination);
@@ -200,6 +244,17 @@ void ntglCullFace(int cull_front);
 void ntglPolygonMode(int front, NTGLpolygonMode mode);
 void ntglPointSize(float size);
 void ntglLineWidth(float width);
+void ntglSetFragmentFunction(NTGLfragmentFn function, void *user);
+void ntglDrawProgrammable(NTGLprimitive primitive, const NTGLprogramVertex *vertices, int count,
+                          int varying_count, NTGLprogramFragmentFn fragment, void *user);
+void ntglDrawProgrammableNoDerivatives(NTGLprimitive primitive,
+                                       const NTGLprogramVertex *vertices,
+                                       int count, int varying_count,
+                                       NTGLprogramFragmentFn fragment, void *user);
+/* The fragment callback guarantees color components in the [0, 1] range. */
+void ntglDrawProgrammableNoDerivativesClamped(
+    NTGLprimitive primitive, const NTGLprogramVertex *vertices, int count,
+    int varying_count, NTGLprogramFragmentFn fragment, void *user);
 
 void ntglMatrixMode(NTGLmatrixMode mode);
 void ntglLoadIdentity(void);

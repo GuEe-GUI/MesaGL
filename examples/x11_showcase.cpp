@@ -3,6 +3,7 @@
 #include "backends/imgui_impl_opengl3.h"
 #include "imgui.h"
 #include "mesaGL/port.h"
+#include "mesaGL_imgui_x11.h"
 #include "mesaGL_x11.h"
 
 #include <stdint.h>
@@ -10,6 +11,25 @@
 #include <time.h>
 
 static bool scene_fog = true;
+
+struct FrameTimings {
+    double scene_ms;
+    double compose_ms;
+    double imgui_ms;
+    double imgui_build_ms;
+    double imgui_draw_ms;
+    double present_ms;
+    int imgui_vertices;
+    int imgui_indices;
+};
+
+static double monotonic_seconds(void)
+{
+    struct timespec now;
+
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (double)now.tv_sec + (double)now.tv_nsec / 1000000000.0;
+}
 
 static void setup_style(void)
 {
@@ -152,13 +172,18 @@ static void compose_scene(GLuint texture, int width, int height)
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 }
 
-static void render_ui(int width, int height, float angle)
+static void render_ui(int width, int height, float angle, float delta_time,
+                      FrameTimings &timings)
 {
     static float quality = 0.86f;
+    static char label[64] = "software rendering";
     ImGuiIO &io = ImGui::GetIO();
+    double build_start = monotonic_seconds();
+    double draw_start;
+    ImDrawData *draw_data;
 
     io.DisplaySize = ImVec2((float)width, (float)height);
-    io.DeltaTime = 1.0f / 60.0f;
+    io.DeltaTime = delta_time;
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
     ImGui_ImplOpenGL3_NewFrame();
     ImGui::NewFrame();
@@ -185,8 +210,18 @@ static void render_ui(int width, int height, float angle)
     ImGui::SameLine();
     ImGui::Text("Quality %.0f%%", quality * 100.0f);
     ImGui::ProgressBar(quality, ImVec2(-1, 12));
+    ImGui::SetNextItemWidth(235.0f);
+    ImGui::InputText("Label", label, sizeof(label));
     ImGui::Spacing();
     ImGui::Text("Rotation: %.1f deg", angle);
+    ImGui::Text("Performance: %.1f FPS (%.2f ms/frame)", io.Framerate,
+                io.Framerate > 0.0f ? 1000.0f / io.Framerate : 0.0f);
+    ImGui::TextDisabled("scene %.1f | compose %.1f | UI %.1f | present %.1f ms",
+                        timings.scene_ms, timings.compose_ms,
+                        timings.imgui_ms, timings.present_ms);
+    ImGui::TextDisabled("UI build %.2f | draw %.2f ms | %d vtx / %d idx",
+                        timings.imgui_build_ms, timings.imgui_draw_ms,
+                        timings.imgui_vertices, timings.imgui_indices);
     ImGui::Text("Backend: framebuffer-only C99 core");
     ImGui::Text("Window port: X11 MIT-SHM reference");
     ImGui::Spacing();
@@ -194,7 +229,13 @@ static void render_ui(int width, int height, float angle)
     ImGui::TextDisabled("ESC or close the window to exit");
     ImGui::End();
     ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    draw_data = ImGui::GetDrawData();
+    draw_start = monotonic_seconds();
+    timings.imgui_build_ms = (draw_start - build_start) * 1000.0;
+    timings.imgui_vertices = draw_data ? draw_data->TotalVtxCount : 0;
+    timings.imgui_indices = draw_data ? draw_data->TotalIdxCount : 0;
+    ImGui_ImplOpenGL3_RenderDrawData(draw_data);
+    timings.imgui_draw_ms = (monotonic_seconds() - draw_start) * 1000.0;
 }
 
 int main(void)
@@ -205,17 +246,22 @@ int main(void)
     static const GLfloat blue_position[] = {0.8f, 0.35f, 1.0f, 0.0f};
     static const GLfloat specular[] = {0.8f, 0.8f, 0.8f, 1.0f};
     static const GLfloat fog_color[] = {0.025f, 0.04f, 0.09f, 1.0f};
-    static const struct timespec delay = {0, 16666667};
+    static const double target_frame_time = 1.0 / 60.0;
+    static const float rotation_speed = 39.0f;
     const int width = 1100, height = 620;
     MesaGLX11 *x11 = mesaGLX11Create(width, height, "MesaGL integrated framebuffer showcase");
     MesaGLPortContext *context;
     GLuint texture, fbo, depth;
     float angle = 0.0f;
+    struct timespec previous_frame;
+    FrameTimings timings = {};
 
     if (!x11 || !(context = mesaGLPortCreate(mesaGLX11GetPortConfig(x11)))) {
         fprintf(stderr, "Unable to create the X11 framebuffer or MesaGL context\n");
         return 1;
     }
+    fprintf(stderr, "MesaGL X11 SIMD backend: %s\n",
+            mesaGLX11GetSIMDBackend(x11));
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -249,20 +295,61 @@ int main(void)
     ImGui::StyleColorsDark();
     setup_style();
     ImGui::GetIO().IniFilename = NULL;
+    mesaGLImGuiX11Init(x11);
     if (!ImGui_ImplOpenGL3_Init("#version 100")) {
         fprintf(stderr, "Unable to initialize the Dear ImGui GLES2 backend\n");
         return 3;
     }
+    clock_gettime(CLOCK_MONOTONIC, &previous_frame);
     while (mesaGLX11PollEvents(x11)) {
-        render_scene_to_fbo(fbo, angle);
-        compose_scene(texture, width, height);
-        render_ui(width, height, angle);
-        mesaGLPortPresent(context);
-        angle += 0.65f;
-        if (angle >= 360.0f)
+        struct timespec frame_start;
+        struct timespec frame_end;
+        double delta_time;
+        double render_time;
+        double stage_start;
+        double stage_end;
+
+        clock_gettime(CLOCK_MONOTONIC, &frame_start);
+        delta_time = (double)(frame_start.tv_sec - previous_frame.tv_sec) +
+                     (double)(frame_start.tv_nsec - previous_frame.tv_nsec) /
+                         1000000000.0;
+        if (delta_time <= 0.0 || delta_time > 0.25)
+            delta_time = target_frame_time;
+        previous_frame = frame_start;
+        angle += rotation_speed * (float)delta_time;
+        while (angle >= 360.0f)
             angle -= 360.0f;
-        nanosleep(&delay, NULL);
+        stage_start = monotonic_seconds();
+        render_scene_to_fbo(fbo, angle);
+        stage_end = monotonic_seconds();
+        timings.scene_ms = (stage_end - stage_start) * 1000.0;
+        stage_start = stage_end;
+        compose_scene(texture, width, height);
+        stage_end = monotonic_seconds();
+        timings.compose_ms = (stage_end - stage_start) * 1000.0;
+        stage_start = stage_end;
+        render_ui(width, height, angle, (float)delta_time, timings);
+        stage_end = monotonic_seconds();
+        timings.imgui_ms = (stage_end - stage_start) * 1000.0;
+        stage_start = stage_end;
+        mesaGLPortPresent(context);
+        stage_end = monotonic_seconds();
+        timings.present_ms = (stage_end - stage_start) * 1000.0;
+        clock_gettime(CLOCK_MONOTONIC, &frame_end);
+        render_time = (double)(frame_end.tv_sec - frame_start.tv_sec) +
+                      (double)(frame_end.tv_nsec - frame_start.tv_nsec) /
+                          1000000000.0;
+        if (render_time < target_frame_time) {
+            double remaining = target_frame_time - render_time;
+            struct timespec delay = {
+                (time_t)remaining,
+                (long)((remaining - (time_t)remaining) * 1000000000.0),
+            };
+
+            nanosleep(&delay, NULL);
+        }
     }
+    mesaGLImGuiX11Shutdown(x11);
     ImGui_ImplOpenGL3_Shutdown();
     ImGui::DestroyContext();
     glDeleteFramebuffers(1, &fbo);
